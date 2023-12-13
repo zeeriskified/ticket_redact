@@ -1,6 +1,5 @@
 import base64
 import requests
-import random
 import os
 from datetime import datetime, timedelta
 
@@ -12,31 +11,6 @@ zendesk_domain = os.environ.get("ZENDESK_SBX_DOMAIN")
 # Encode credentials for Basic Authentication
 credentials = base64.b64encode(f'{email}/token:{api_token}'.encode('utf-8')).decode('utf-8')
 
-# Define your criteria for deletion
-def should_redact_attachment(ticket):
-    created_at = datetime.strptime(ticket['created_at'], "%Y-%m-%dT%H:%M:%SZ")
-    three_months_ago = datetime.now() - timedelta(days=90)
-    return created_at < three_months_ago
-
-# Redact ticket comments with attachments
-def redact_ticket_comments(ticket_id):
-    headers = {
-        "Authorization": f"Basic {credentials}",
-        "Content-Type": "application/json"
-    }
-    comments = get_ticket_comments(ticket_id)
-    for comment in comments:
-        if comment['attachments']:
-            # Redact the entire comment
-            redact_endpoint = f"https://{zendesk_domain}.zendesk.com/api/v2/tickets/{ticket_id}/comments/{comment['id']}/redact.json"
-            data = {"text": "This comment has been redacted due to age and content."}
-            response = requests.put(redact_endpoint, json=data, headers=headers)
-            if response.status_code == 200:
-                print(f"Comment {comment['id']} on ticket {ticket_id} redacted successfully.")
-            else:
-                print(f"Failed to redact comment {comment['id']} on ticket {ticket_id}. Status: {response.status_code}")
-
-# Fetch ticket comments with attachments info
 def get_ticket_comments(ticket_id):
     headers = {
         "Authorization": f"Basic {credentials}",
@@ -47,7 +21,37 @@ def get_ticket_comments(ticket_id):
         return response.json()['comments']
     return []
 
-# Process tickets
+def redact_ticket_comments(ticket_id):
+    headers = {
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/json"
+    }
+    comments = get_ticket_comments(ticket_id)
+    for comment in comments:
+        if comment['attachments']:
+            redact_endpoint = f"https://{zendesk_domain}.zendesk.com/api/v2/tickets/{ticket_id}/comments/{comment['id']}/redact.json"
+            data = {"text": "This comment has been redacted due to age and content."}
+
+            # Enhanced logging for debugging
+            print(f"Attempting to redact comment {comment['id']} on ticket {ticket_id}")
+            print(f"Redact endpoint: {redact_endpoint}")
+            print(f"Data being sent: {data}")
+            print(f"Headers: {headers}")
+
+            response = requests.put(redact_endpoint, json=data, headers=headers)
+            print(f"Redaction response status: {response.status_code}")
+            print(f"Redaction response body: {response.text}")
+
+            if response.status_code == 200:
+                print(f"Comment {comment['id']} on ticket {ticket_id} redacted successfully.")
+            else:
+                print(f"Failed to redact comment {comment['id']} on ticket {ticket_id}.")
+
+def should_redact_attachment(ticket):
+    created_at = datetime.strptime(ticket['created_at'], "%Y-%m-%dT%H:%M:%SZ")
+    three_months_ago = datetime.now() - timedelta(days=90)
+    return created_at <= three_months_ago  # Check if the ticket is older than or equal to 3 months
+
 def process_tickets():
     headers = {
         "Authorization": f"Basic {credentials}",
