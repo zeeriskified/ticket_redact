@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta
 
 # Zendesk API credentials and domain
-email = os.environ.get("email")  # Replace with actual environment variable name for email
+email = os.environ.get("email")
 api_token = os.environ.get("ZENDESK_SBX_API_TOKEN")
 zendesk_domain = os.environ.get("ZENDESK_SBX_DOMAIN")
 
@@ -17,40 +17,40 @@ def get_ticket_comments(ticket_id):
         "Content-Type": "application/json"
     }
     response = requests.get(f"https://{zendesk_domain}.zendesk.com/api/v2/tickets/{ticket_id}/comments.json", headers=headers)
-    if response.status_code == 200:
-        return response.json()['comments']
-    return []
+    return response.json().get('comments', []) if response.status_code == 200 else []
 
-def redact_ticket_comments(ticket_id):
+def redact_attachment(ticket_id, comment_id, attachment_id):
     headers = {
         "Authorization": f"Basic {credentials}",
         "Content-Type": "application/json"
     }
-    comments = get_ticket_comments(ticket_id)
-    for comment in comments:
-        if comment['attachments']:
-            redact_endpoint = f"https://{zendesk_domain}.zendesk.com/api/v2/tickets/{ticket_id}/comments/{comment['id']}/redact.json"
-            data = {"text": "This comment has been redacted due to age and content."}
+    redact_endpoint = f"https://{zendesk_domain}.zendesk.com/api/v2/tickets/{ticket_id}/comments/{comment_id}/attachments/{attachment_id}/redact"
+    
+    response = requests.put(redact_endpoint, headers=headers)
 
-            # Enhanced logging for debugging
-            print(f"Attempting to redact comment {comment['id']} on ticket {ticket_id}")
-            print(f"Redact endpoint: {redact_endpoint}")
-            print(f"Data being sent: {data}")
-            print(f"Headers: {headers}")
+    log_message = f"Redacted attachment {attachment_id} in comment {comment_id} of ticket {ticket_id} successfully." if response.status_code == 200 else f"Failed to redact attachment {attachment_id} in comment {comment_id} of ticket {ticket_id}. Status: {response.status_code}, Response: {response.text}"
+    print(log_message)
+    log_comment(ticket_id, log_message)
 
-            response = requests.put(redact_endpoint, json=data, headers=headers)
-            print(f"Redaction response status: {response.status_code}")
-            print(f"Redaction response body: {response.text}")
+def log_comment(ticket_id, text):
+    headers = {
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "ticket": {
+            "comment": {
+                "body": text,
+                "public": False
+            }
+        }
+    }
+    requests.put(f"https://{zendesk_domain}.zendesk.com/api/v2/tickets/{ticket_id}.json", headers=headers, json=data)
 
-            if response.status_code == 200:
-                print(f"Comment {comment['id']} on ticket {ticket_id} redacted successfully.")
-            else:
-                print(f"Failed to redact comment {comment['id']} on ticket {ticket_id}.")
-
-def should_redact_attachment(ticket):
+def should_redact_attachment(ticket, comment):
     created_at = datetime.strptime(ticket['created_at'], "%Y-%m-%dT%H:%M:%SZ")
     three_months_ago = datetime.now() - timedelta(days=90)
-    return created_at <= three_months_ago  # Check if the ticket is older than or equal to 3 months
+    return created_at <= three_months_ago and any(comment.get('attachments', []))
 
 def process_tickets():
     headers = {
@@ -59,10 +59,15 @@ def process_tickets():
     }
     response = requests.get(f"https://{zendesk_domain}.zendesk.com/api/v2/tickets.json", headers=headers)
     if response.status_code == 200:
-        all_tickets = response.json()['tickets']
+        all_tickets = response.json().get('tickets', [])
         for ticket in all_tickets:
-            if should_redact_attachment(ticket):
-                redact_ticket_comments(ticket['id'])
+            comments = get_ticket_comments(ticket['id'])
+            for comment in comments:
+                if should_redact_attachment(ticket, comment):
+                    for attachment in comment['attachments']:
+                        redact_attachment(ticket['id'], comment['id'], attachment['id'])
+    else:
+        print(f"Failed to fetch tickets. Status: {response.status_code}, Response: {response.text}")
 
 # Example Usage
 process_tickets()
